@@ -5,12 +5,15 @@ import { NemiApiError, NemiError, NemiRateLimitError } from "./errors";
 import { apiErrorFromResponse, networkError, parseRetryAfter, parseSuccess } from "./http";
 import { appendQuery, defaultSleep, type FetchLike, resolveFetch, trimTrailingSlash } from "./runtime";
 import type {
+  AddPhotosResult,
   Album,
+  Calendar,
   CalendarEvent,
   CalendarEventInput,
   Canvas,
   CanvasSummary,
   CellValue,
+  CreatedFolder,
   Doc,
   DocSummary,
   DownloadLink,
@@ -21,7 +24,9 @@ import type {
   NemiFile,
   NemiUser,
   Photo,
+  PhotoDetail,
   PhotoPage,
+  SetCellsResult,
   Sheet,
   SheetSummary,
   TokenSet,
@@ -305,7 +310,8 @@ export class NemiClient {
     download: (id: string): Promise<DownloadLink> => this.request("GET", `/files/${enc(id)}/download`),
     /**
      * Upload a file in three steps: create an upload, PUT the bytes to the
-     * returned URL, then complete it. Max 50 MB.
+     * returned URL with the returned headers (never the bearer token), then
+     * complete it. Max 50 MB.
      */
     upload: async (data: UploadData, options: FileUploadOptions): Promise<NemiFile> => {
       const { body, size, type: blobType } = await toBytesOrBlob(data);
@@ -315,11 +321,21 @@ export class NemiClient {
         body: { workspaceId: options.workspaceId, folderId: options.folderId, name: options.name, type, size },
         signal: options.signal,
       });
+      if (session.maxSize > 0 && size > session.maxSize) {
+        throw new NemiApiError(`This upload is limited to ${session.maxSize} bytes`, { status: 413, code: "too_large" });
+      }
+      // Use the server's headers as they are: they may be part of a signed URL.
+      const putHeaders: Record<string, string> = { ...(session.headers ?? {}) };
+      const hasContentType = Object.keys(putHeaders).some((k) => k.toLowerCase() === "content-type");
+      if (!hasContentType && type) putHeaders["Content-Type"] = type;
+      for (const k of Object.keys(putHeaders)) {
+        if (k.toLowerCase() === "authorization") delete putHeaders[k];
+      }
       let put: Response;
       try {
         put = await this.#fetch(session.uploadUrl, {
-          method: session.method ?? "PUT",
-          headers: type ? { "Content-Type": type } : {},
+          method: session.method || "PUT",
+          headers: putHeaders,
           body: body as BodyInit,
           signal: options.signal,
         });
@@ -337,88 +353,111 @@ export class NemiClient {
       await put.body?.cancel().catch(() => undefined);
       return this.request<NemiFile>("POST", `/files/uploads/${enc(session.uploadId)}/complete`, { signal: options.signal });
     },
-    /** Rename or move. */
+    /** Rename and/or move. `folderId: null` moves to the top level. */
     update: (id: string, changes: { name?: string; folderId?: string | null }): Promise<NemiFile> =>
       this.request("PATCH", `/files/${enc(id)}`, { body: changes }),
-    /** Moves to trash where the plan has one. */
+    /** Moves to trash where the plan has one. Answers 204. */
     delete: (id: string): Promise<void> => this.request("DELETE", `/files/${enc(id)}`),
   };
 
   readonly folders = {
-    create: (params: { workspaceId: string; name: string; parentId?: string }): Promise<Folder> =>
+    create: (params: { workspaceId: string; name: string; parentId?: string }): Promise<CreatedFolder> =>
       this.request("POST", "/folders", { body: params }),
   };
 
   readonly gallery = {
     photos: {
-      /** One page of photos, newest first. */
+      /** One page of photos, newest first. Without `workspaceId`, the person's default library. */
       list: (params: PhotoListParams = {}): Promise<PhotoPage> => this.request("GET", "/gallery/photos", { query: { ...params } }),
       /** Every photo, following `nextCursor` until the end. */
       iterate: (params: Omit<PhotoListParams, "cursor"> = {}): AsyncIterableIterator<Photo> => this.#iteratePhotos(params),
-      /** A photo with its full size `url` (15 minutes). */
-      get: (id: string): Promise<Photo> => this.request("GET", `/gallery/photos/${enc(id)}`),
+      /** A photo with its full size `url` (15 minutes) and its albums. */
+      get: (id: string): Promise<PhotoDetail> => this.request("GET", `/gallery/photos/${enc(id)}`),
       /** JPEG, PNG, HEIC, WebP or AVIF, up to 50 MB. Nemi re-encodes it. */
-      upload: async (data: Blob | ArrayBuffer | ArrayBufferView, options: { workspaceId: string; name?: string; type?: string; signal?: AbortSignal }): Promise<Photo> => {
+      upload: async (
+        data: Blob | ArrayBuffer | ArrayBufferView,
+        options: { workspaceId?: string; name?: string; type?: string; capturedAt?: string; signal?: AbortSignal },
+      ): Promise<Photo> => {
         const { body, size } = await toBytesOrBlob(data);
         if (size > MAX_UPLOAD_BYTES) {
           throw new NemiApiError("Photos are limited to 50 MB", { status: 413, code: "too_large" });
         }
         const blob =
           body instanceof Uint8Array ? new Blob([body as BlobPart], { type: options.type ?? "application/octet-stream" }) : body;
-        // The API reads `workspace_id` and `file`. Content-Type (with the boundary) is set by fetch.
+        // The API reads `file`, `workspace_id` and `captured_at`. Content-Type (with the boundary) is set by fetch.
         const form = new FormData();
-        form.append("workspace_id", options.workspaceId);
+        if (options.workspaceId) form.append("workspace_id", options.workspaceId);
+        if (options.capturedAt) form.append("captured_at", options.capturedAt);
         form.append("file", blob, options.name ?? (data as { name?: string }).name ?? "photo");
         return this.request("POST", "/gallery/photos", { formData: form, signal: options.signal });
       },
-      update: (id: string, changes: { favorite: boolean }): Promise<Photo> =>
+      update: (id: string, changes: { favorite: boolean }): Promise<PhotoDetail> =>
         this.request("PATCH", `/gallery/photos/${enc(id)}`, { body: changes }),
     },
     albums: {
       list: (params: { workspaceId?: string } = {}): Promise<{ albums: Album[] }> => this.request("GET", "/gallery/albums", { query: params }),
-      create: (params: { workspaceId: string; name: string }): Promise<Album> => this.request("POST", "/gallery/albums", { body: params }),
-      addPhotos: (albumId: string, photoIds: string[]): Promise<unknown> =>
+      create: (params: { workspaceId?: string; name: string }): Promise<Album> => this.request("POST", "/gallery/albums", { body: params }),
+      /** Up to 500 ids per call. Photos already in the album are counted as skipped. */
+      addPhotos: (albumId: string, photoIds: string[]): Promise<AddPhotosResult> =>
         this.request("POST", `/gallery/albums/${enc(albumId)}/photos`, { body: { photoIds } }),
     },
   };
 
   readonly docs = {
-    list: (params: { workspaceId?: string } = {}): Promise<{ docs: DocSummary[] }> => this.request("GET", "/docs", { query: params }),
+    /** Without `workspaceId`, every workspace the person can read. */
+    list: (params: { workspaceId?: string; limit?: number } = {}): Promise<{ docs: DocSummary[] }> =>
+      this.request("GET", "/docs", { query: params }),
     get: (id: string): Promise<Doc> => this.request("GET", `/docs/${enc(id)}`),
     create: (params: { workspaceId?: string; title: string; markdown?: string }): Promise<Doc> => this.request("POST", "/docs", { body: params }),
-    update: (id: string, changes: { title?: string; markdown?: string }): Promise<Doc> =>
+    /** `mode: "append"` adds the Markdown to the end instead of replacing the body. */
+    update: (id: string, changes: { title?: string; markdown?: string; mode?: "replace" | "append" }): Promise<Doc> =>
       this.request("PATCH", `/docs/${enc(id)}`, { body: changes }),
+    /** Final, answers 204. */
     delete: (id: string): Promise<void> => this.request("DELETE", `/docs/${enc(id)}`),
   };
 
   readonly sheets = {
-    list: (params: { workspaceId?: string } = {}): Promise<{ sheets: SheetSummary[] }> => this.request("GET", "/sheets", { query: params }),
+    list: (params: { workspaceId?: string; limit?: number } = {}): Promise<{ sheets: SheetSummary[] }> =>
+      this.request("GET", "/sheets", { query: params }),
+    /** The first tab. */
     get: (id: string): Promise<Sheet> => this.request("GET", `/sheets/${enc(id)}`),
-    create: (params: { workspaceId?: string; title: string }): Promise<Sheet> => this.request("POST", "/sheets", { body: params }),
+    create: (params: { workspaceId?: string; title: string; cells?: Record<string, CellValue> }): Promise<Sheet> =>
+      this.request("POST", "/sheets", { body: params }),
     /** Set cells by A1 reference: `setCells(id, { A1: "Total", B1: 42 })`. */
-    setCells: (id: string, cells: Record<string, CellValue>): Promise<Sheet> =>
+    setCells: (id: string, cells: Record<string, CellValue>): Promise<SetCellsResult> =>
       this.request("PATCH", `/sheets/${enc(id)}/cells`, { body: { cells } }),
     delete: (id: string): Promise<void> => this.request("DELETE", `/sheets/${enc(id)}`),
   };
 
   readonly forms = {
-    list: (params: { workspaceId?: string } = {}): Promise<{ forms: FormSummary[] }> => this.request("GET", "/forms", { query: params }),
+    list: (params: { workspaceId?: string; limit?: number } = {}): Promise<{ forms: FormSummary[] }> =>
+      this.request("GET", "/forms", { query: params }),
     get: (id: string): Promise<Form> => this.request("GET", `/forms/${enc(id)}`),
-    responses: (id: string): Promise<FormResponses> => this.request("GET", `/forms/${enc(id)}/responses`),
-    create: (params: { workspaceId?: string; title: string; fields?: unknown[] }): Promise<Form> => this.request("POST", "/forms", { body: params }),
+    responses: (id: string, params: { limit?: number; offset?: number } = {}): Promise<FormResponses> =>
+      this.request("GET", `/forms/${enc(id)}/responses`, { query: params }),
+    create: (params: { workspaceId?: string; title: string; description?: string; items?: unknown[] }): Promise<Form> =>
+      this.request("POST", "/forms", { body: params }),
     delete: (id: string): Promise<void> => this.request("DELETE", `/forms/${enc(id)}`),
   };
 
   readonly canvas = {
-    list: (params: { workspaceId?: string } = {}): Promise<{ canvases: CanvasSummary[] }> => this.request("GET", "/canvas", { query: params }),
-    get: (id: string): Promise<Canvas> => this.request("GET", `/canvas/${enc(id)}`),
+    list: (params: { workspaceId?: string; limit?: number } = {}): Promise<{ canvases: CanvasSummary[] }> =>
+      this.request("GET", "/canvas", { query: params }),
+    /** Pass `{ strokes: true }` to include freehand strokes. */
+    get: (id: string, params: { strokes?: boolean } = {}): Promise<Canvas> =>
+      this.request("GET", `/canvas/${enc(id)}`, { query: params.strokes ? { strokes: true } : {} }),
   };
 
   readonly calendar = {
+    calendars: {
+      /** Calendars made in Nemi. Needs `calendar.read` or `calendar.write`. */
+      list: (): Promise<{ calendars: Calendar[] }> => this.request("GET", "/calendar/calendars"),
+    },
     events: {
       /** Events from calendars made in Nemi, between `start` and `end` (ISO 8601). */
-      list: (params: { start: string; end: string }): Promise<{ events: CalendarEvent[] }> =>
+      list: (params: { start: string; end: string; calendarId?: string }): Promise<{ events: CalendarEvent[] }> =>
         this.request("GET", "/calendar/events", { query: params }),
+      /** Without `calendarId`, the person's primary Nemi calendar. */
       create: (event: CalendarEventInput): Promise<CalendarEvent> => this.request("POST", "/calendar/events", { body: event }),
       update: (id: string, changes: Partial<CalendarEventInput>): Promise<CalendarEvent> =>
         this.request("PATCH", `/calendar/events/${enc(id)}`, { body: changes }),

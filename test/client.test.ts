@@ -56,20 +56,159 @@ describe("NemiClient basics", () => {
     expect(calls[1]!.url).toBe(`${API}/calendar/events/e%2F1`);
   });
 
-  it("round trips sheet cells without touching A1 keys", async () => {
-    const { fetch, calls } = mockFetch((c) =>
-      c.url === `${API}/sheets/s1/cells` ? json({ id: "s1", title: "T", cells: { A1: "Total", B12: 42 } }) : undefined,
-    );
-    const sheet = await client(fetch).sheets.setCells("s1", { A1: "Total", B12: 42 });
+  it("sets sheet cells without touching A1 keys and reads them back", async () => {
+    const { fetch, calls } = mockFetch((c) => {
+      if (c.url === `${API}/sheets/s1/cells`) return json({ id: "s1", updated: 2 });
+      if (c.url === `${API}/sheets/s1`) {
+        return json({ id: "s1", title: "T", workspace_id: "w1", updated_at: "t", rows: 12, cols: 2, cells: { A1: "Total", B12: 42 } });
+      }
+      return undefined;
+    });
+    const c = client(fetch);
+    const result = await c.sheets.setCells("s1", { A1: "Total", B12: 42 });
     expect(JSON.parse(String(calls[0]!.body))).toEqual({ cells: { A1: "Total", B12: 42 } });
     expect(calls[0]!.method).toBe("PATCH");
-    expect(sheet.cells).toEqual({ A1: "Total", B12: 42 });
+    expect(result).toEqual({ id: "s1", updated: 2 });
+    const sheet = await c.sheets.get("s1");
+    expect(sheet).toEqual({ id: "s1", title: "T", workspaceId: "w1", updatedAt: "t", rows: 12, cols: 2, cells: { A1: "Total", B12: 42 } });
   });
 
-  it("sends album photo ids as photo_ids", async () => {
-    const { fetch, calls } = mockFetch((c) => (c.url === `${API}/gallery/albums/a1/photos` ? json({ ok: true }) : undefined));
-    await client(fetch).gallery.albums.addPhotos("a1", ["p1", "p2"]);
+  it("adds photos to an album and returns the counts", async () => {
+    const { fetch, calls } = mockFetch((c) =>
+      c.url === `${API}/gallery/albums/a1/photos` ? json({ album_id: "a1", added: 1, skipped: 1 }) : undefined,
+    );
+    const res = await client(fetch).gallery.albums.addPhotos("a1", ["p1", "p2"]);
     expect(JSON.parse(String(calls[0]!.body))).toEqual({ photo_ids: ["p1", "p2"] });
+    expect(res).toEqual({ albumId: "a1", added: 1, skipped: 1 });
+  });
+});
+
+describe("v1 response shapes", () => {
+  it("maps the list wrappers", async () => {
+    const { fetch, calls } = mockFetch((c) => {
+      const path = c.url.slice(API.length).split("?")[0];
+      const row = { id: "x", title: "T", workspace_id: "w1", updated_at: "t" };
+      if (path === "/docs") return json({ docs: [{ ...row, preview: "Hello" }] });
+      if (path === "/sheets") return json({ sheets: [row] });
+      if (path === "/forms") return json({ forms: [{ ...row, published: true }] });
+      if (path === "/canvas") return json({ canvases: [row] });
+      return undefined;
+    });
+    const c = client(fetch);
+    expect((await c.docs.list({ workspaceId: "w1", limit: 5 })).docs[0]).toEqual({ id: "x", title: "T", workspaceId: "w1", updatedAt: "t", preview: "Hello" });
+    expect((await c.sheets.list()).sheets[0]!.updatedAt).toBe("t");
+    expect((await c.forms.list()).forms[0]!.published).toBe(true);
+    expect((await c.canvas.list()).canvases[0]!.workspaceId).toBe("w1");
+    expect(calls[0]!.url).toBe(`${API}/docs?workspace_id=w1&limit=5`);
+  });
+
+  it("reads form responses with paging", async () => {
+    const { fetch, calls } = mockFetch(() => json({ form_id: "f1", total: 3, responses: [{ id: "r1", submitted_at: "t", answers: { q_1: "yes" } }] }));
+    const res = await client(fetch).forms.responses("f1", { limit: 1, offset: 2 });
+    expect(calls[0]!.url).toBe(`${API}/forms/f1/responses?limit=1&offset=2`);
+    expect(res).toEqual({ formId: "f1", total: 3, responses: [{ id: "r1", submittedAt: "t", answers: { q_1: "yes" } }] });
+  });
+
+  it("creates forms with description and items", async () => {
+    const { fetch, calls } = mockFetch(() => json({ id: "f1", title: "Poll" }, 201));
+    await client(fetch).forms.create({ title: "Poll", description: "Pick one", items: [{ type: "choice", title: "Day" }] });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ title: "Poll", description: "Pick one", items: [{ type: "choice", title: "Day" }] });
+  });
+
+  it("appends to a doc", async () => {
+    const { fetch, calls } = mockFetch(() => json({ id: "d1", title: "T", preview: "", workspace_id: "w", updated_at: "t", markdown: "a\nb" }));
+    const doc = await client(fetch).docs.update("d1", { markdown: "b", mode: "append" });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ markdown: "b", mode: "append" });
+    expect(doc.markdown).toBe("a\nb");
+  });
+
+  it("asks for canvas strokes only when wanted", async () => {
+    const { fetch, calls } = mockFetch(() => json({ id: "c1" }));
+    const c = client(fetch);
+    await c.canvas.get("c1");
+    await c.canvas.get("c1", { strokes: true });
+    expect(calls.map((x) => x.url)).toEqual([`${API}/canvas/c1`, `${API}/canvas/c1?strokes=true`]);
+  });
+
+  it("creates a folder", async () => {
+    const { fetch, calls } = mockFetch(() => json({ id: "d1", name: "Invoices", workspace_id: "w1", parent_id: null }, 201));
+    const folder = await client(fetch).folders.create({ workspaceId: "w1", name: "Invoices" });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ workspace_id: "w1", name: "Invoices" });
+    expect(folder).toEqual({ id: "d1", name: "Invoices", workspaceId: "w1", parentId: null });
+  });
+
+  it("maps photos, the single photo and albums", async () => {
+    const photo = {
+      id: "p1",
+      workspace_id: "w1",
+      name: "a.jpg",
+      width: 4,
+      height: 3,
+      size: 10,
+      captured_at: null,
+      favorite: true,
+      color: "#aabbcc",
+      thumbnail_url: "https://t",
+    };
+    const { fetch } = mockFetch((c) => {
+      if (c.url === `${API}/gallery/photos/p1`) return json({ ...photo, url: "https://full", albums: [{ id: "a1", name: "Trip" }] });
+      if (c.url.startsWith(`${API}/gallery/albums`)) return json({ albums: [{ id: "a1", name: "Trip", count: 1, cover_url: null }] });
+      return undefined;
+    });
+    const c = client(fetch);
+    const detail = await c.gallery.photos.get("p1");
+    expect(detail).toMatchObject({ workspaceId: "w1", color: "#aabbcc", thumbnailUrl: "https://t", url: "https://full", albums: [{ id: "a1", name: "Trip" }] });
+    expect((await c.gallery.albums.list()).albums).toEqual([{ id: "a1", name: "Trip", count: 1, coverUrl: null }]);
+  });
+
+  it("lists calendars and creates an event on the primary calendar", async () => {
+    const event = {
+      id: "e1",
+      calendar_id: "cal1",
+      title: "Lunch",
+      start: "2026-10-14T11:00:00Z",
+      end: "2026-10-14T12:00:00Z",
+      all_day: false,
+      location: null,
+      description: null,
+      timezone: "Europe/Amsterdam",
+      rrule: null,
+    };
+    const { fetch, calls } = mockFetch((c) => {
+      if (c.url === `${API}/calendar/calendars`) {
+        return json({ calendars: [{ id: "cal1", name: "Personal", color: "#f00", timezone: "Europe/Amsterdam", primary: true }] });
+      }
+      if (c.url === `${API}/calendar/events` && c.method === "POST") return json(event, 201);
+      if (c.url.startsWith(`${API}/calendar/events?`)) return json({ events: [event] });
+      return undefined;
+    });
+    const c = client(fetch);
+    expect((await c.calendar.calendars.list()).calendars[0]).toEqual({
+      id: "cal1",
+      name: "Personal",
+      color: "#f00",
+      timezone: "Europe/Amsterdam",
+      primary: true,
+    });
+    const created = await c.calendar.events.create({ title: "Lunch", start: event.start, end: event.end, timezone: "Europe/Amsterdam" });
+    expect(JSON.parse(String(calls[1]!.body))).toEqual({ title: "Lunch", start: event.start, end: event.end, timezone: "Europe/Amsterdam" });
+    expect(created).toMatchObject({ calendarId: "cal1", allDay: false, rrule: null });
+    await c.calendar.events.list({ start: "a", end: "b", calendarId: "cal1" });
+    expect(calls[2]!.url).toBe(`${API}/calendar/events?start=a&end=b&calendar_id=cal1`);
+  });
+
+  it("answers undefined for every 204 DELETE", async () => {
+    const { fetch, calls } = mockFetch(() => new Response(null, { status: 204 }));
+    const c = client(fetch);
+    const results = await Promise.all([
+      c.files.delete("1"),
+      c.docs.delete("2"),
+      c.sheets.delete("3"),
+      c.forms.delete("4"),
+      c.calendar.events.delete("5"),
+    ]);
+    expect(results).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(calls.every((x) => x.method === "DELETE")).toBe(true);
   });
 });
 
@@ -210,10 +349,21 @@ describe("automatic refresh", () => {
 });
 
 describe("file upload", () => {
-  function uploadMock() {
+  function uploadMock(maxSize = 52_428_800) {
     return mockFetch((c) => {
       if (c.url === `${API}/files/uploads` && c.method === "POST") {
-        return json({ upload_id: "up_1", upload_url: "https://storage.example/put?sig=abc", method: "PUT", expires_at: "t" });
+        const type = JSON.parse(String(c.body)).type as string | undefined;
+        return json(
+          {
+            upload_id: "up_1",
+            upload_url: "https://storage.example/put?sig=abc",
+            method: "PUT",
+            headers: type ? { "Content-Type": type, "x-nemi-upload_ticket": "t1" } : {},
+            max_size: maxSize,
+            expires_at: "t",
+          },
+          201,
+        );
       }
       if (c.url === "https://storage.example/put?sig=abc" && c.method === "PUT") return new Response(null, { status: 200 });
       if (c.url === `${API}/files/uploads/up_1/complete` && c.method === "POST") {
@@ -240,7 +390,8 @@ describe("file upload", () => {
     expect(JSON.parse(String(calls[0]!.body))).toEqual({ workspace_id: "w1", folder_id: "d1", name: "a.txt", type: "text/plain", size: 5 });
     const put = calls[1]!;
     expect(put.headers.authorization).toBeUndefined();
-    expect(put.headers["content-type"]).toBe("text/plain");
+    // The server's headers are sent as they are, with keys untouched by case conversion.
+    expect(put.headers).toEqual({ "content-type": "text/plain", "x-nemi-upload_ticket": "t1" });
     expect(new TextDecoder().decode(put.body as Uint8Array)).toBe("hello");
   });
 
@@ -265,9 +416,20 @@ describe("file upload", () => {
     expect(new TextDecoder().decode(calls[1]!.body as Uint8Array)).toBe("hello");
   });
 
+  it("refuses a body larger than the answered max_size before the PUT", async () => {
+    const { fetch, calls } = uploadMock(3);
+    await expect(client(fetch).files.upload(new Uint8Array(4), { workspaceId: "w1", name: "big.bin" })).rejects.toMatchObject({
+      status: 413,
+      code: "too_large",
+    });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
   it("fails clearly when the PUT fails", async () => {
     const { fetch } = mockFetch((c) => {
-      if (c.url === `${API}/files/uploads`) return json({ upload_id: "u", upload_url: "https://s.example/x", method: "PUT", expires_at: "t" });
+      if (c.url === `${API}/files/uploads`) {
+        return json({ upload_id: "u", upload_url: "https://s.example/x", method: "PUT", headers: {}, max_size: 100, expires_at: "t" });
+      }
       if (c.method === "PUT") return new Response("denied", { status: 403 });
       return undefined;
     });
@@ -283,11 +445,13 @@ describe("file upload", () => {
       workspaceId: "w1",
       name: "a.jpg",
       type: "image/jpeg",
+      capturedAt: "2026-10-01T10:00:00Z",
     });
     expect(photo).toEqual({ id: "p1", thumbnailUrl: "u" });
     const body = calls[0]!.body as FormData;
     expect(body).toBeInstanceOf(FormData);
     expect(body.get("workspace_id")).toBe("w1");
+    expect(body.get("captured_at")).toBe("2026-10-01T10:00:00Z");
     const file = body.get("file") as File;
     expect(file.name).toBe("a.jpg");
     expect(file.type).toBe("image/jpeg");

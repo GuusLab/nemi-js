@@ -126,22 +126,42 @@ export interface DownloadLink {
 export interface UploadSession {
   uploadId: string;
   uploadUrl: string;
-  method: "PUT";
+  method: "PUT" | (string & {});
+  /** Send exactly these headers with the PUT, and no bearer token. Keys are kept as the server sent them. */
+  headers: Record<string, string>;
+  /** Largest accepted body in bytes. */
+  maxSize: number;
   expiresAt: string;
+}
+
+/** A folder as answered by `POST /folders`. */
+export interface CreatedFolder {
+  id: string;
+  name: string;
+  workspaceId: string;
+  parentId: string | null;
 }
 
 export interface Photo {
   id: string;
+  workspaceId: string;
   name: string;
   width: number;
   height: number;
   size: number;
   capturedAt: string | null;
   favorite: boolean;
+  /** Dominant colour, for placeholders. */
+  color: string | null;
   /** Expires after 15 minutes: fetch again rather than storing it. */
   thumbnailUrl: string;
-  /** Full size, only on `gallery.photos.get`. Expires after 15 minutes. */
-  url?: string;
+}
+
+/** A single photo from `gallery.photos.get` (and `update`): adds the full size URL and its albums. */
+export interface PhotoDetail extends Photo {
+  /** Full size, expires after 15 minutes. */
+  url: string;
+  albums: Array<{ id: string; name: string }>;
 }
 
 export interface PhotoPage {
@@ -153,22 +173,25 @@ export interface Album {
   id: string;
   name: string;
   count: number;
+  coverUrl: string | null;
+}
+
+export interface AddPhotosResult {
+  albumId: string;
+  added: number;
+  skipped: number;
 }
 
 export interface DocSummary {
   id: string;
   title: string;
-  workspaceId?: string;
-  updatedAt?: string;
-  [field: string]: unknown;
-}
-
-export interface Doc {
-  id: string;
-  title: string;
-  markdown: string;
+  preview: string;
   workspaceId: string;
   updatedAt: string;
+}
+
+export interface Doc extends DocSummary {
+  markdown: string;
 }
 
 export type CellValue = string | number | boolean | null;
@@ -176,64 +199,91 @@ export type CellValue = string | number | boolean | null;
 export interface SheetSummary {
   id: string;
   title: string;
-  [field: string]: unknown;
+  workspaceId: string;
+  updatedAt: string;
 }
 
-export interface Sheet {
-  id: string;
-  title: string;
+/** A sheet's first tab. */
+export interface Sheet extends SheetSummary {
+  rows: number;
+  cols: number;
   /** Keyed by A1 references, such as `{ A1: "Name", B2: 42 }`. */
   cells: Record<string, CellValue>;
+}
+
+export interface SetCellsResult {
+  id: string;
+  updated: number;
 }
 
 export interface FormSummary {
   id: string;
   title: string;
-  [field: string]: unknown;
+  published: boolean;
+  workspaceId: string;
+  updatedAt: string;
 }
 
+/** A form with its questions. The exact fields are documented at https://dev.nemilab.com/docs. */
 export interface Form {
   id: string;
   title: string;
-  fields?: unknown[];
   [field: string]: unknown;
 }
 
 export interface FormResponses {
+  formId: string;
+  total: number;
   responses: Array<Record<string, unknown>>;
-  [field: string]: unknown;
 }
 
 export interface CanvasSummary {
   id: string;
-  title?: string;
-  name?: string;
-  [field: string]: unknown;
+  title: string;
+  workspaceId: string;
+  updatedAt: string;
 }
 
+/** A board with its shapes and text (and strokes when asked for). */
 export interface Canvas {
   id: string;
   [field: string]: unknown;
 }
 
+export interface Calendar {
+  id: string;
+  name: string;
+  color: string | null;
+  timezone: string | null;
+  primary: boolean;
+}
+
 export interface CalendarEvent {
   id: string;
+  calendarId: string;
   title: string;
   start: string;
   end: string;
-  allDay?: boolean;
-  location?: string | null;
-  description?: string | null;
-  [field: string]: unknown;
+  allDay: boolean;
+  location: string | null;
+  description: string | null;
+  timezone: string | null;
+  rrule: string | null;
 }
 
 export interface CalendarEventInput {
+  /** Defaults to the person's primary Nemi calendar. */
+  calendarId?: string;
   title: string;
-  /** ISO 8601 UTC. */
+  /** ISO 8601. */
   start: string;
-  /** ISO 8601 UTC. */
+  /** ISO 8601. */
   end: string;
   allDay?: boolean;
   location?: string;
   description?: string;
+  /** IANA time zone, such as `Europe/Amsterdam`. */
+  timezone?: string;
+  /** RFC 5545 recurrence rule, such as `FREQ=WEEKLY;BYDAY=MO`. */
+  rrule?: string;
 }

@@ -215,16 +215,17 @@ new NemiClient({ tokens, auth, onTokens }); // refreshes before expiry and on 40
 | --- | --- |
 | account | `me()`, `workspaces.list()` |
 | `files` | `list({ workspaceId, folderId?, limit? })`, `search(q, { workspaceId?, limit? })`, `get(id)`, `download(id)`, `upload(data, { workspaceId, folderId?, name, type? })`, `update(id, { name?, folderId? })`, `delete(id)` |
-| `folders` | `create({ workspaceId, name, parentId? })` |
-| `gallery.photos` | `list({ workspaceId?, albumId?, favorites?, cursor?, limit? })`, `iterate(params)`, `get(id)`, `upload(data, { workspaceId, name?, type? })`, `update(id, { favorite })` |
-| `gallery.albums` | `list({ workspaceId? })`, `create({ workspaceId, name })`, `addPhotos(albumId, photoIds)` |
-| `docs` | `list`, `get`, `create({ workspaceId?, title, markdown? })`, `update(id, { title?, markdown? })`, `delete` |
-| `sheets` | `list`, `get`, `create({ workspaceId?, title })`, `setCells(id, { A1: "Total", B1: 42 })`, `delete` |
-| `forms` | `list`, `get`, `responses(id)`, `create({ workspaceId?, title, fields? })`, `delete` |
-| `canvas` | `list`, `get` |
-| `calendar.events` | `list({ start, end })`, `create({ title, start, end, allDay?, location?, description? })`, `update(id, changes)`, `delete(id)` |
+| `folders` | `create({ workspaceId, name, parentId? })` returns `{ id, name, workspaceId, parentId }` |
+| `gallery.photos` | `list({ workspaceId?, albumId?, favorites?, cursor?, limit? })` returns `{ photos, nextCursor }`, `iterate(params)`, `get(id)` (adds `url` and `albums`), `upload(data, { workspaceId?, name?, type?, capturedAt? })`, `update(id, { favorite })` |
+| `gallery.albums` | `list({ workspaceId? })` returns `{ albums: [{ id, name, count, coverUrl }] }`, `create({ workspaceId?, name })`, `addPhotos(albumId, photoIds)` returns `{ albumId, added, skipped }` |
+| `docs` | `list({ workspaceId?, limit? })` returns `{ docs }`, `get`, `create({ workspaceId?, title, markdown? })`, `update(id, { title?, markdown?, mode?: "replace" \| "append" })`, `delete` |
+| `sheets` | `list` returns `{ sheets }`, `get` (first tab: `rows`, `cols`, `cells`), `create({ workspaceId?, title, cells? })`, `setCells(id, { A1: "Total", B1: 42 })` returns `{ id, updated }`, `delete` |
+| `forms` | `list` returns `{ forms }`, `get`, `responses(id, { limit?, offset? })` returns `{ formId, total, responses }`, `create({ workspaceId?, title, description?, items? })`, `delete` |
+| `canvas` | `list` returns `{ canvases }`, `get(id, { strokes? })` |
+| `calendar.calendars` | `list()` returns `{ calendars: [{ id, name, color, timezone, primary }] }` |
+| `calendar.events` | `list({ start, end, calendarId? })` returns `{ events }`, `create({ calendarId?, title, start, end, allDay?, location?, description?, timezone?, rrule? })` (primary calendar when `calendarId` is left out), `update(id, changes)`, `delete(id)` |
 
-Everything is camelCase in TypeScript and snake_case on the wire; the SDK converts both ways (cell references such as `A1` are left alone). `files.upload` accepts a `Blob`, `File`, `ArrayBuffer`, `Uint8Array` or `ReadableStream` and runs the three steps for you: create the upload, PUT the bytes, complete it. Max 50 MB. Download and image URLs expire after 15 minutes: fetch them again rather than storing them.
+Everything is camelCase in TypeScript and snake_case on the wire; the SDK converts both ways (cell references such as `A1` are left alone). `files.upload` accepts a `Blob`, `File`, `ArrayBuffer`, `Uint8Array` or `ReadableStream` and runs the three steps for you: create the upload, PUT the bytes to `uploadUrl` with exactly the `headers` the server answered (never the bearer token), then complete it. Bodies over the answered `maxSize` (50 MB) are refused before the PUT. Every `delete` answers 204 and resolves to `undefined`. Download and image URLs expire after 15 minutes: fetch them again rather than storing them.
 
 For anything not wrapped yet, use `client.request(method, path, { query, body })`.
 

@@ -4,6 +4,24 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Types and methods follow the exact v1 response shapes: list wrappers
+  (`docs`, `sheets`, `forms`, `canvases`, `events`), `forms.responses` with
+  `formId`, `total` and paging, `sheets.setCells` returning `{ id, updated }`,
+  folders, albums with `coverUrl`, `addPhotos` counts, photos with
+  `workspaceId` and `color`, and `PhotoDetail` with `url` and `albums`.
+- `files.upload` sends the PUT with the headers from the upload answer and
+  checks `maxSize` first.
+
+### Added
+
+- `calendar.calendars.list()`, optional `calendarId`, `timezone` and `rrule`
+  on events, `docs.update` `mode: "append"`, `canvas.get` strokes, `limit` on
+  lists, `capturedAt` on photo uploads.
+
 ## [0.1.0] - 2026-10-14
 
 ### Added
