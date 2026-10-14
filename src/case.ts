@@ -6,7 +6,7 @@
  * user data, not API fields.
  */
 
-const OPAQUE_KEYS = new Set(["cells", "answers", "metadata", "headers"]);
+const OPAQUE_KEYS = new Set(["cells", "answers", "metadata", "headers", "elements"]);
 
 export function camelToSnakeKey(key: string): string {
   if (!/^[a-z][a-zA-Z0-9]*$/.test(key)) return key;

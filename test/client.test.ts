@@ -60,7 +60,15 @@ describe("NemiClient basics", () => {
     const { fetch, calls } = mockFetch((c) => {
       if (c.url === `${API}/sheets/s1/cells`) return json({ id: "s1", updated: 2 });
       if (c.url === `${API}/sheets/s1`) {
-        return json({ id: "s1", title: "T", workspace_id: "w1", updated_at: "t", rows: 12, cols: 2, cells: { A1: "Total", B12: 42 } });
+        return json({
+          id: "s1",
+          title: "T",
+          workspace_id: "w1",
+          updated_at: "t",
+          rows: 12,
+          cols: 2,
+          cells: { A1: { value: "Total", display: "Total" }, B12: { value: 42, display: "42.00" } },
+        });
       }
       return undefined;
     });
@@ -70,7 +78,8 @@ describe("NemiClient basics", () => {
     expect(calls[0]!.method).toBe("PATCH");
     expect(result).toEqual({ id: "s1", updated: 2 });
     const sheet = await c.sheets.get("s1");
-    expect(sheet).toEqual({ id: "s1", title: "T", workspaceId: "w1", updatedAt: "t", rows: 12, cols: 2, cells: { A1: "Total", B12: 42 } });
+    expect(sheet.cells).toEqual({ A1: { value: "Total", display: "Total" }, B12: { value: 42, display: "42.00" } });
+    expect(sheet).toMatchObject({ id: "s1", workspaceId: "w1", updatedAt: "t", rows: 12, cols: 2 });
   });
 
   it("adds photos to an album and returns the counts", async () => {
@@ -109,10 +118,40 @@ describe("v1 response shapes", () => {
     expect(res).toEqual({ formId: "f1", total: 3, responses: [{ id: "r1", submittedAt: "t", answers: { q_1: "yes" } }] });
   });
 
-  it("creates forms with description and items", async () => {
+  it("creates forms with description and fields", async () => {
     const { fetch, calls } = mockFetch(() => json({ id: "f1", title: "Poll" }, 201));
-    await client(fetch).forms.create({ title: "Poll", description: "Pick one", items: [{ type: "choice", title: "Day" }] });
-    expect(JSON.parse(String(calls[0]!.body))).toEqual({ title: "Poll", description: "Pick one", items: [{ type: "choice", title: "Day" }] });
+    await client(fetch).forms.create({ title: "Poll", description: "Pick one", fields: [{ type: "choice", title: "Day" }] });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ title: "Poll", description: "Pick one", fields: [{ type: "choice", title: "Day" }] });
+  });
+
+  it("creates sheets with initial cells", async () => {
+    const { fetch, calls } = mockFetch(() => json({ id: "s1", title: "T", workspace_id: "w", updated_at: "t", rows: 1, cols: 1, cells: {} }, 201));
+    await client(fetch).sheets.create({ title: "T", cells: { A1: "Name" } });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ title: "T", cells: { A1: "Name" } });
+  });
+
+  it("exposes preferredUsername on me()", async () => {
+    const { fetch } = mockFetch(() => json({ id: "u1", name: "Ada", preferred_username: "ada", email_verified: true }));
+    expect(await client(fetch).me()).toEqual({ id: "u1", name: "Ada", preferredUsername: "ada", emailVerified: true });
+  });
+
+  it("creates, updates and deletes a canvas, keeping element keys as they are", async () => {
+    const elements = [{ id: "e1", type: "text", text: "Hi", stroke_color: "#000", x: 1, y: 2 }];
+    const { fetch, calls } = mockFetch((c) => {
+      if (c.method === "POST") return json({ id: "c1", title: "Board", workspace_id: "w1", updated_at: "t" }, 201);
+      if (c.method === "PATCH") return json({ id: "c1", title: "Board", elements });
+      if (c.method === "DELETE") return new Response(null, { status: 204 });
+      return undefined;
+    });
+    const c = client(fetch);
+    expect(await c.canvas.create({ workspaceId: "w1", title: "Board" })).toEqual({ id: "c1", title: "Board", workspaceId: "w1", updatedAt: "t" });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual({ workspace_id: "w1", title: "Board" });
+    const board = await c.canvas.update("c1", { elements });
+    expect(calls[1]!.url).toBe(`${API}/canvas/c1`);
+    expect(JSON.parse(String(calls[1]!.body))).toEqual({ elements });
+    expect(board.elements).toEqual(elements);
+    await expect(c.canvas.delete("c1")).resolves.toBeUndefined();
+    expect(calls[2]!.method).toBe("DELETE");
   });
 
   it("appends to a doc", async () => {
@@ -206,8 +245,9 @@ describe("v1 response shapes", () => {
       c.sheets.delete("3"),
       c.forms.delete("4"),
       c.calendar.events.delete("5"),
+      c.canvas.delete("6"),
     ]);
-    expect(results).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(results).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
     expect(calls.every((x) => x.method === "DELETE")).toBe(true);
   });
 });

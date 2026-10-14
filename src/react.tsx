@@ -27,7 +27,7 @@ const SESSION_KEY = "nemi.session";
 
 export interface NemiSignInOptions {
   scopes?: NemiScope[] | string[];
-  prompt?: "consent" | "login" | "none" | (string & {});
+  prompt?: "consent" | "none";
   /** Returned after a redirect sign-in. Defaults to the current URL. */
   returnTo?: string;
 }
@@ -76,7 +76,7 @@ const NemiContext = createContext<NemiContextValue | null>(null);
 function userFromClaims(claims: IdTokenClaims): NemiUser {
   const user: NemiUser = { id: claims.sub };
   if (claims.name !== undefined) user.name = claims.name;
-  if (claims.preferred_username !== undefined) user.username = claims.preferred_username;
+  if (claims.preferred_username !== undefined) user.preferredUsername = claims.preferred_username;
   if (claims.picture !== undefined) user.picture = claims.picture;
   if (claims.email !== undefined) user.email = claims.email;
   if (claims.email_verified !== undefined) user.emailVerified = claims.email_verified;

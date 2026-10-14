@@ -90,7 +90,8 @@ export interface NemiUserInfo {
 export interface NemiUser {
   id: string;
   name?: string;
-  username?: string;
+  /** Wire name `preferred_username`. Needs `profile`. */
+  preferredUsername?: string;
   picture?: string;
   email?: string;
   emailVerified?: boolean;
@@ -194,7 +195,14 @@ export interface Doc extends DocSummary {
   markdown: string;
 }
 
+/** A value you write into a cell. */
 export type CellValue = string | number | boolean | null;
+
+/** A cell as the API answers it: the stored value plus the formatted text. */
+export interface SheetCell {
+  value: CellValue;
+  display: string;
+}
 
 export interface SheetSummary {
   id: string;
@@ -207,8 +215,8 @@ export interface SheetSummary {
 export interface Sheet extends SheetSummary {
   rows: number;
   cols: number;
-  /** Keyed by A1 references, such as `{ A1: "Name", B2: 42 }`. */
-  cells: Record<string, CellValue>;
+  /** Keyed by A1 references, such as `{ A1: { value: 42, display: "42" } }`. */
+  cells: Record<string, SheetCell>;
 }
 
 export interface SetCellsResult {

@@ -55,7 +55,7 @@ export interface AuthorizationUrlOptions {
   /** Defaults to 32 random bytes when `openid` is requested. */
   nonce?: string;
   /** `consent` always shows the consent screen. */
-  prompt?: "consent" | "login" | "none" | (string & {});
+  prompt?: "consent" | "none";
   /** Extra query parameters, for future OIDC options. */
   extraParams?: Record<string, string>;
 }

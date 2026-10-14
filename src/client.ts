@@ -435,7 +435,8 @@ export class NemiClient {
     get: (id: string): Promise<Form> => this.request("GET", `/forms/${enc(id)}`),
     responses: (id: string, params: { limit?: number; offset?: number } = {}): Promise<FormResponses> =>
       this.request("GET", `/forms/${enc(id)}/responses`, { query: params }),
-    create: (params: { workspaceId?: string; title: string; description?: string; items?: unknown[] }): Promise<Form> =>
+    /** `fields` are the questions, as described at https://dev.nemilab.com/docs. */
+    create: (params: { workspaceId?: string; title: string; description?: string; fields?: unknown[] }): Promise<Form> =>
       this.request("POST", "/forms", { body: params }),
     delete: (id: string): Promise<void> => this.request("DELETE", `/forms/${enc(id)}`),
   };
@@ -446,6 +447,16 @@ export class NemiClient {
     /** Pass `{ strokes: true }` to include freehand strokes. */
     get: (id: string, params: { strokes?: boolean } = {}): Promise<Canvas> =>
       this.request("GET", `/canvas/${enc(id)}`, { query: params.strokes ? { strokes: true } : {} }),
+    create: (params: { workspaceId?: string; title?: string } = {}): Promise<CanvasSummary> =>
+      this.request("POST", "/canvas", { body: params }),
+    /**
+     * Rename and/or replace the board. `elements` REPLACES the whole board:
+     * get it, change the list, send it all back. Returns the board.
+     */
+    update: (id: string, changes: { title?: string; elements?: unknown[] }): Promise<Canvas> =>
+      this.request("PATCH", `/canvas/${enc(id)}`, { body: changes }),
+    /** Final, answers 204. */
+    delete: (id: string): Promise<void> => this.request("DELETE", `/canvas/${enc(id)}`),
   };
 
   readonly calendar = {

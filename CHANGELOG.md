@@ -16,8 +16,16 @@ All notable changes to this package are documented here. The format follows
 - `files.upload` sends the PUT with the headers from the upload answer and
   checks `maxSize` first.
 
+- `me()` returns `preferredUsername` (wire `preferred_username`) instead of
+  `username`, matching the id_token and UserInfo.
+- `prompt` accepts only `"consent"` or `"none"`, the values the server supports.
+- `forms.create` sends `fields`.
+- Sheet cells come back as `{ A1: { value, display } }` (`SheetCell`).
+
 ### Added
 
+- `canvas.create`, `canvas.update` (title and full board `elements`) and
+  `canvas.delete`.
 - `calendar.calendars.list()`, optional `calendarId`, `timezone` and `rrule`
   on events, `docs.update` `mode: "append"`, `canvas.get` strokes, `limit` on
   lists, `capturedAt` on photo uploads.
