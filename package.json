@@ -1,0 +1,122 @@
+{
+  "name": "@guuslab/nemi",
+  "version": "0.1.0",
+  "description": "Official JavaScript and TypeScript SDK for Sign in with Nemi and the Nemi REST API.",
+  "keywords": [
+    "nemi",
+    "oauth",
+    "oauth2",
+    "openid-connect",
+    "oidc",
+    "pkce",
+    "sign-in",
+    "sdk",
+    "api-client",
+    "react"
+  ],
+  "homepage": "https://dev.nemilab.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GuusLab/nemi-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GuusLab/nemi-js/issues"
+  },
+  "license": "MIT",
+  "author": "GuusLab (https://nemilab.com)",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser.d.ts",
+        "default": "./dist/browser.js"
+      },
+      "require": {
+        "types": "./dist/browser.d.cts",
+        "default": "./dist/browser.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "browser": [
+        "./dist/browser.d.ts"
+      ],
+      "server": [
+        "./dist/server.d.ts"
+      ],
+      "react": [
+        "./dist/react.d.ts"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsup": "^9.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.4"
+  }
+}
